@@ -2,51 +2,79 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
+
+type webData struct {
+	URL   string
+	TITLE string
+}
 
 // Challenge: Web Scraper with Goroutines
 func main() {
 	website := []string{
 		"https://go.dev",
 		"https://google.com",
-		"amazone.com",
+		"https://amazone.com",
 	}
-	ch := make(chan interface{})
+	ch := make(chan webData, len(website))
 	errorCh := make(chan error)
+	reteLimite := time.Tick(500 * time.Millisecond)
 	for _, url := range website {
+		<-reteLimite
 		go extractInfoFromURL(url, ch, errorCh)
 	}
-	<-ch
-
+	for range website {
+		data := <-ch
+		fmt.Println("Title of the website", data.TITLE)
+	}
 }
 
-func extractInfoFromURL(url string, ch chan interface{}, errCh chan error) error {
+func extractInfoFromURL(url string, ch chan webData, errCh chan error) {
 	// Make an HTTP GET request to the specified URL.
-	response, err := http.Get(url)
+	client := http.Client{
+		Timeout: 10 * time.Second,
+	}
+	res, err := client.Get(url)
 	if err != nil {
-		return err
+		log.Printf("Error fetching %s: %v\n", url, err)
+		ch <- webData{
+			URL:   url,
+			TITLE: err.Error()}
+		return
 	}
-	defer response.Body.Close()
-
-	if response.StatusCode != 200 {
-		errCh := fmt.Errorf("HTTP request failed with status code: %d", response.StatusCode)
-		<-errCh
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		log.Printf("Received non-200 status code for %s: %d\n", url, res.StatusCode)
+		ch <- webData{URL: url, TITLE: "Error"}
+		return
 	}
 
-	// Parse the HTML content using goquery.
-	doc, err := goquery.NewDocumentFromReader(response.Body)
+	if res.StatusCode != 200 {
+		log.Printf("status code is not 200")
+		ch <- webData{
+			URL:   url,
+			TITLE: "error status code",
+		}
+		return
+	}
+	doc, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		return err
+		log.Printf("doc error")
+		ch <- webData{
+			URL:   url,
+			TITLE: "error status code",
+		}
+		return
 	}
-
-	// Extract and print the title of the webpage.
 	title := doc.Find("title").Text()
-	fmt.Println("Title:", title)
-
-	// You can extract other information here, such as headings or specific data.
-
-	return nil
+	ch <- webData{
+		URL:   url,
+		TITLE: title,
+	}
+	// You can extract other information here, such as headings or specific data
 }
